@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MMO Client</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; font-family: system-ui, sans-serif; }
+    #app { width: 100%; height: 100%; }
+    canvas { display: block; }
+
+    .overlay {
+      position: absolute; inset: 0; display: flex;
+      align-items: center; justify-content: center;
+      background: rgba(10, 14, 24, 0.85); z-index: 20;
+    }
+    .overlay.hidden { display: none; }
+    .panel {
+      background: #1c2333; color: #e6e9f0; padding: 28px 32px;
+      border-radius: 10px; min-width: 320px; text-align: center;
+    }
+    .panel h1 { font-size: 22px; margin-bottom: 16px; }
+    .panel input {
+      width: 100%; padding: 10px; font-size: 16px; border-radius: 6px;
+      border: 1px solid #3a4663; background: #11162a; color: #e6e9f0; margin-bottom: 12px;
+    }
+    .panel button {
+      width: 100%; padding: 10px; font-size: 16px; border: 0; border-radius: 6px;
+      background: #3b82f6; color: white; cursor: pointer;
+    }
+    .panel .err { color: #f87171; font-size: 13px; min-height: 18px; margin-bottom: 8px; }
+
+    #death-overlay {
+      position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+      background: rgba(120, 0, 0, 0.35); z-index: 15; pointer-events: none;
+    }
+    #death-overlay span { color: #fff; font-size: 48px; font-weight: 700; text-shadow: 0 2px 8px #000; }
+
+    #hud {
+      position: absolute; left: 12px; bottom: 12px; z-index: 10; color: #fff;
+      text-shadow: 0 1px 3px #000; user-select: none;
+    }
+    #hp-bar { width: 220px; height: 16px; background: #222a; border: 1px solid #0008; border-radius: 4px; overflow: hidden; }
+    #hp-fill { height: 100%; width: 100%; background: #22c55e; transition: width 0.15s; }
+    #hp-text { font-size: 12px; margin-top: 2px; }
+    #target-label { font-size: 14px; margin-bottom: 6px; min-height: 18px; }
+    #xp-bar { width: 220px; height: 8px; background: #222a; border: 1px solid #0008; border-radius: 4px; overflow: hidden; margin-top: 4px; }
+    #xp-fill { height: 100%; width: 0%; background: #a78bfa; transition: width 0.15s; }
+    #xp-text { font-size: 11px; margin-top: 2px; color: #d8cfff; }
+
+    #quest-log {
+      position: absolute; right: 12px; top: 80px; z-index: 10; width: 280px;
+      background: rgba(17, 22, 42, 0.9); border: 1px solid #3a4663; border-radius: 8px;
+      color: #e6e9f0; padding: 12px 14px; user-select: none;
+    }
+    #quest-log.hidden { display: none; }
+    #quest-log h2 { font-size: 15px; margin-bottom: 8px; color: #fbbf24; }
+    #quest-log .quest { margin-bottom: 10px; }
+    #quest-log .quest .qname { font-size: 13px; font-weight: 700; }
+    #quest-log .quest .qobj { font-size: 12px; color: #cbd5e1; margin-left: 8px; }
+    #quest-log .quest .qobj.done { color: #22c55e; text-decoration: line-through; }
+    #quest-log .quest .qready { font-size: 11px; color: #22c55e; margin-left: 8px; }
+    #quest-log .quest .qabandon {
+      font-size: 11px; margin-left: 8px; margin-top: 2px; padding: 1px 6px;
+      border: 1px solid #3a4663; border-radius: 4px; background: transparent;
+      color: #94a3b8; cursor: pointer;
+    }
+    #quest-log .quest .qabandon:hover { color: #f87171; border-color: #f87171; }
+    #quest-log .qempty { font-size: 12px; color: #94a3b8; font-style: italic; }
+
+    #quest-dialog {
+      position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+      z-index: 12; width: 340px; background: #1c2333; border: 1px solid #3a4663;
+      border-radius: 10px; color: #e6e9f0; padding: 18px 20px;
+    }
+    #quest-dialog.hidden { display: none; }
+    #quest-dialog h2 { font-size: 17px; margin-bottom: 10px; }
+    #quest-dialog .qd-quest { margin-bottom: 12px; }
+    #quest-dialog .qd-quest .qname { font-size: 14px; font-weight: 700; color: #fbbf24; }
+    #quest-dialog .qd-quest .qdesc { font-size: 12px; color: #cbd5e1; margin: 4px 0 6px; }
+    #quest-dialog .qd-quest .qreward { font-size: 11px; color: #a78bfa; margin-bottom: 6px; }
+    #quest-dialog .qbtn {
+      padding: 5px 14px; font-size: 13px; border: 0; border-radius: 6px;
+      background: #3b82f6; color: white; cursor: pointer;
+    }
+    #quest-dialog .qbtn.turnin { background: #22c55e; }
+    #quest-dialog .qd-flavor { font-size: 13px; color: #94a3b8; font-style: italic; }
+    #quest-dialog .qd-close {
+      position: absolute; top: 8px; right: 12px; background: transparent; border: 0;
+      color: #94a3b8; font-size: 16px; cursor: pointer;
+    }
+
+    #boss-bar {
+      position: absolute; top: 26px; left: 50%; transform: translateX(-50%);
+      width: 46%; min-width: 320px; z-index: 10; user-select: none; text-align: center;
+    }
+    #boss-bar.hidden { display: none; }
+    #boss-name {
+      color: #fde68a; font-size: 18px; font-weight: 700; letter-spacing: 2px;
+      text-shadow: 0 2px 6px #000; margin-bottom: 4px; text-transform: capitalize;
+    }
+    #boss-hp {
+      height: 14px; background: rgba(0, 0, 0, 0.55); border: 1px solid #000c;
+      border-radius: 3px; overflow: hidden; box-shadow: 0 2px 8px #0008;
+    }
+    #boss-hp-fill {
+      height: 100%; width: 100%; transition: width 0.2s;
+      background: linear-gradient(#b91c1c, #7f1d1d);
+    }
+
+    #chat {
+      position: absolute; left: 12px; top: 12px; z-index: 10; width: 360px;
+      display: flex; flex-direction: column; gap: 6px; user-select: none;
+    }
+    #chat-messages {
+      max-height: 200px; overflow-y: auto; font-size: 13px; color: #fff;
+      text-shadow: 0 1px 2px #000; display: flex; flex-direction: column; gap: 2px;
+      background: rgba(0,0,0,0.25); border-radius: 6px; padding: 6px 8px;
+    }
+    #chat-messages .global .ch { color: #fbbf24; }
+    #chat-messages .local .ch { color: #93c5fd; }
+    #chat-messages .sys { color: #a3a3a3; font-style: italic; }
+    #chat-input {
+      width: 100%; padding: 6px 8px; font-size: 13px; border-radius: 6px;
+      border: 1px solid #3a4663; background: rgba(12, 16, 32, 0.8); color: #e6e9f0;
+      display: none;
+    }
+    #help {
+      position: absolute; right: 12px; bottom: 12px; z-index: 10; color: #cbd5e1;
+      font-size: 12px; text-align: right; text-shadow: 0 1px 2px #000; user-select: none;
+    }
+
+    #ability-bar {
+      position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 8px; z-index: 10; user-select: none;
+    }
+    .ability {
+      position: relative; width: 52px; height: 52px; border-radius: 8px;
+      border: 2px solid #3a4663; background: rgba(17, 22, 42, 0.85);
+      color: #fff; cursor: pointer; overflow: hidden;
+      display: flex; align-items: center; justify-content: center; font-size: 24px;
+    }
+    .ability:hover { border-color: #3b82f6; }
+    .ability .key {
+      position: absolute; top: 1px; left: 4px; font-size: 11px; color: #94a3b8; font-weight: 700;
+    }
+    .ability .cd {
+      position: absolute; left: 0; right: 0; bottom: 0; height: 0%;
+      background: rgba(0, 0, 0, 0.72); pointer-events: none;
+    }
+    .ability .cd-text {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      font-size: 16px; font-weight: 700; color: #fbbf24; text-shadow: 0 1px 2px #000;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="boss-bar" class="hidden">
+    <div id="boss-name"></div>
+    <div id="boss-hp"><div id="boss-hp-fill"></div></div>
+  </div>
+
+  <div id="chat">
+    <div id="chat-messages"></div>
+    <input id="chat-input" maxlength="240"
+      placeholder="Say something… (/g for global, Esc to close)" autocomplete="off" />
+  </div>
+
+  <div id="hud">
+    <div id="target-label"></div>
+    <div id="hp-bar"><div id="hp-fill"></div></div>
+    <div id="hp-text"></div>
+    <div id="xp-bar"><div id="xp-fill"></div></div>
+    <div id="xp-text"></div>
+  </div>
+
+  <div id="quest-log" class="hidden">
+    <h2>Quests</h2>
+    <div id="quest-list"></div>
+  </div>
+
+  <div id="quest-dialog" class="hidden">
+    <button class="qd-close" id="qd-close">&times;</button>
+    <h2 id="qd-title"></h2>
+    <div id="qd-body"></div>
+  </div>
+
+  <div id="ability-bar"></div>
+
+  <div id="help">
+    W/S run &middot; A/D turn &middot; Q/E strafe &middot; Space jump<br />
+    right-drag steer &middot; left-drag look &middot; Tab target &middot; 1&ndash;5 abilities &middot; Enter chat<br />
+    F interact &middot; L quest log
+  </div>
+
+  <div id="death-overlay"><span>You died</span></div>
+
+  <div id="join-overlay" class="overlay">
+    <div class="panel">
+      <h1>Enter the world</h1>
+      <div class="err" id="join-error"></div>
+      <input id="join-name" maxlength="16" placeholder="Character name" autocomplete="off" />
+      <button id="join-btn">Play</button>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

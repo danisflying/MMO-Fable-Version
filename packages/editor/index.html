@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MMO World Editor</title>
+  <style>
+    :root {
+      --chrome: #1a2130;
+      --raised: #222b42;
+      --well: #10162a;
+      --border: #33405f;
+      --text: #e7eaf2;
+      --muted: #8b97ad;
+      --accent: #4f8df9;
+      --success: #27a45c;
+      --danger: #ef5350;
+      --shadow: 0 10px 30px rgba(3, 7, 16, 0.55), 0 2px 8px rgba(3, 7, 16, 0.4);
+      --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    body {
+      display: flex; flex-direction: column;
+      font: 13px/1.45 system-ui, "Segoe UI", sans-serif;
+      color: var(--text); background: var(--chrome);
+    }
+    button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+      outline: 2px solid var(--accent); outline-offset: 1px;
+    }
+
+    /* ── Menu bar ─────────────────────────────────────────────── */
+    #menubar {
+      display: flex; align-items: center;
+      height: 30px; padding: 0 8px; flex: none;
+      border-bottom: 1px solid var(--border);
+      user-select: none;
+      /* Menubar and toolbar are body flex items, so z-index applies; the
+         menubar must sit higher or its dropdowns paint under the toolbar. */
+      z-index: 30;
+    }
+    .wordmark { font-weight: 650; font-size: 12.5px; letter-spacing: 0.04em; padding: 0 10px 0 4px; }
+    .wordmark em { color: var(--accent); font-style: normal; }
+    .menu { position: relative; }
+    .menu > button { padding: 4px 10px; border-radius: 4px; }
+    .menu > button:hover, .menu.open > button { background: var(--raised); }
+    .dropdown {
+      display: none;
+      position: absolute; top: calc(100% + 2px); left: 0; z-index: 500;
+      min-width: 220px;
+      background: var(--raised); border: 1px solid var(--border); border-radius: 6px;
+      padding: 4px; box-shadow: var(--shadow);
+    }
+    .menu.open .dropdown { display: block; }
+    .dropdown button {
+      display: flex; align-items: center; gap: 8px;
+      width: 100%; padding: 6px 8px; border-radius: 4px; text-align: left;
+    }
+    .dropdown button:hover { background: var(--accent); color: #fff; }
+    .dropdown button:hover .kbd, .dropdown button:hover .check { color: #fff; }
+    .dropdown hr { border: 0; border-top: 1px solid var(--border); margin: 4px 6px; }
+    .check { width: 14px; color: var(--accent); font-weight: 700; }
+    .kbd { margin-left: auto; color: var(--muted); font-family: var(--mono); font-size: 11px; }
+    #conn { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+    #conn .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+    #conn.ok .dot { background: var(--success); box-shadow: 0 0 6px var(--success); }
+
+    /* ── Toolbar ──────────────────────────────────────────────── */
+    #toolbar {
+      display: flex; align-items: center; gap: 4px;
+      height: 42px; padding: 0 8px; flex: none;
+      border-bottom: 1px solid var(--border);
+      user-select: none; z-index: 20;
+    }
+    .tgroup { display: flex; gap: 2px; }
+    .tsep { width: 1px; height: 22px; background: var(--border); margin: 0 8px; }
+    .tool {
+      display: flex; flex-direction: column; align-items: center;
+      min-width: 44px; padding: 3px 8px 4px;
+      border: 1px solid transparent; border-radius: 6px;
+      color: var(--muted);
+    }
+    .tool .glyph { font-size: 15px; line-height: 1.15; color: var(--text); }
+    .tool .cap { font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase; }
+    .tool:hover { background: var(--raised); }
+    .tool.active {
+      background: color-mix(in srgb, var(--accent) 22%, var(--chrome));
+      border-color: var(--accent); color: var(--text);
+    }
+    #save-btn {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 7px;
+      padding: 7px 14px; border-radius: 6px;
+      background: var(--success); color: #fff; font-weight: 600;
+    }
+    #save-btn:hover { filter: brightness(1.1); }
+
+    /* ── Viewport + status bar ────────────────────────────────── */
+    #viewport { position: relative; flex: 1; overflow: hidden; background: #232837; }
+    #viewport canvas { display: block; }
+    #statusbar {
+      display: flex; align-items: center; gap: 16px;
+      height: 25px; padding: 0 10px; flex: none;
+      border-top: 1px solid var(--border);
+      color: var(--muted); font-size: 11.5px;
+      user-select: none; white-space: nowrap;
+    }
+    #statusbar .right { margin-left: auto; font-family: var(--mono); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ── Floating windows ─────────────────────────────────────── */
+    .window {
+      position: absolute; z-index: 10;
+      background: var(--chrome);
+      border: 1px solid var(--border); border-radius: 8px;
+      box-shadow: var(--shadow);
+      display: flex; flex-direction: column; overflow: hidden;
+      max-height: calc(100% - 24px);
+    }
+    .window.hidden { display: none; }
+    .win-title {
+      display: flex; align-items: center; gap: 8px; flex: none;
+      padding: 6px 8px 6px 11px;
+      background: var(--raised); border-bottom: 1px solid var(--border);
+      cursor: grab; user-select: none; touch-action: none;
+      font-size: 12px; font-weight: 600; letter-spacing: 0.03em;
+    }
+    .win-title:active { cursor: grabbing; }
+    .win-title .spacer { flex: 1; }
+    .win-btn {
+      width: 20px; height: 20px; border-radius: 4px;
+      color: var(--muted); font-size: 12px; line-height: 1;
+      display: grid; place-items: center;
+    }
+    .win-btn:hover { background: var(--well); color: var(--text); }
+    .win-btn.close:hover { background: var(--danger); color: #fff; }
+    .win-body { padding: 10px 11px; overflow-y: auto; display: flex; flex-direction: column; gap: 9px; }
+    .window.collapsed .win-body { display: none; }
+
+    /* ── Controls inside window bodies ────────────────────────── */
+    .win-body h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); }
+    .win-body input, .win-body select, .win-body textarea {
+      width: 100%; padding: 5px 6px; border-radius: 4px;
+      border: 1px solid var(--border);
+      background: var(--well); color: var(--text);
+      font-size: 13px; font-family: inherit;
+    }
+    .win-body input[type="number"] { font-family: var(--mono); font-size: 12px; }
+    .win-body textarea { resize: vertical; min-height: 48px; }
+    .win-body label { display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: 11px; flex: 1; }
+    .win-body button {
+      padding: 6px 10px; border: 1px solid var(--border); border-radius: 5px;
+      background: var(--raised); font-size: 12px;
+    }
+    .win-body button:hover { background: color-mix(in srgb, var(--raised) 84%, #fff 8%); }
+    .win-body button.primary { background: var(--success); border-color: var(--success); color: #fff; font-weight: 600; }
+    .win-body button.primary:hover { filter: brightness(1.1); }
+    .win-body button.danger { background: transparent; border-color: #7f2b2b; color: var(--danger); }
+    .win-body button.danger:hover { background: rgba(239, 83, 80, 0.12); }
+    .frow { display: flex; gap: 7px; }
+    .muted { color: var(--muted); font-size: 12px; font-style: italic; }
+
+    /* Asset manager */
+    .asset-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+    .asset {
+      display: flex; flex-direction: column;
+      border: 1px solid var(--border); border-radius: 6px;
+      background: var(--well); overflow: hidden; padding: 0;
+    }
+    .asset .thumb { height: 46px; }
+    .asset .name {
+      padding: 3px 4px 4px; font-size: 10px; color: var(--muted);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center;
+    }
+    .asset:hover { border-color: var(--muted); background: var(--well); }
+    .asset.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .asset.active .name { color: var(--text); }
+
+    /* Terrain window */
+    .brush-modes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
+    .brush-modes button { padding: 5px 2px; font-size: 11px; }
+    .brush-modes button.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); color: var(--text); }
+    .swatches { display: flex; gap: 6px; }
+    .swatch { width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--border); padding: 0; }
+    .swatch.active { box-shadow: 0 0 0 2px var(--accent); }
+    .win-body input[type="range"] { accent-color: var(--accent); width: 100%; }
+
+    /* NPC library (label.check-row out-specifies the .win-body label column layout) */
+    .win-body label.check-row {
+      flex-direction: row; align-items: center; gap: 6px;
+      font-size: 12px; color: var(--text);
+    }
+    .check-row input[type="checkbox"] { width: auto; }
+    .ability-checks { display: flex; flex-direction: column; gap: 5px; background: var(--well); border-radius: 6px; padding: 8px; }
+
+    /* Quest builder */
+    .quest-row {
+      display: flex; align-items: center; gap: 6px;
+      background: var(--well); border-radius: 6px; padding: 6px 8px;
+    }
+    .quest-row .qname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .quest-row .qid { color: var(--muted); font-size: 11px; font-family: var(--mono); }
+    .quest-row button { padding: 3px 7px; font-size: 11px; }
+    .objective-box {
+      background: var(--well); border-radius: 6px; padding: 8px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .objective-box .obj-head { display: flex; gap: 6px; align-items: center; }
+    .objective-box .obj-head select { flex: 1; }
+
+    /* ── Auth overlay ─────────────────────────────────────────── */
+    .overlay {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: rgba(10, 14, 24, 0.9); z-index: 1000;
+    }
+    .overlay.hidden { display: none; }
+    .overlay .panel-box {
+      background: var(--chrome); padding: 26px 30px; border-radius: 10px;
+      border: 1px solid var(--border); box-shadow: var(--shadow);
+      min-width: 300px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .overlay input {
+      padding: 9px; font-size: 15px; border-radius: 6px;
+      border: 1px solid var(--border); background: var(--well); color: var(--text);
+    }
+    .overlay button {
+      padding: 9px; font-size: 15px; border: 0; border-radius: 6px;
+      background: var(--accent); color: #fff;
+    }
+    .overlay .err { color: var(--danger); font-size: 13px; min-height: 16px; }
+  </style>
+</head>
+<body>
+  <div id="menubar">
+    <div class="wordmark">MMO <em>EDITOR</em></div>
+
+    <div class="menu">
+      <button aria-haspopup="true">File</button>
+      <div class="dropdown">
+        <button id="menu-save"><span class="check"></span>Save World<span class="kbd">Ctrl+S</span></button>
+      </div>
+    </div>
+
+    <div class="menu">
+      <button aria-haspopup="true">Windows</button>
+      <div class="dropdown" id="windows-menu"></div>
+    </div>
+
+    <div id="conn"><span class="dot"></span><span id="conn-text">connecting…</span></div>
+  </div>
+
+  <div id="toolbar">
+    <div class="tgroup">
+      <button class="tool" id="tool-select" title="Select — pick objects, no gizmo"><span class="glyph">➤</span><span class="cap">Select Q</span></button>
+      <button class="tool" id="tool-move" title="Move the selection"><span class="glyph">✥</span><span class="cap">Move W</span></button>
+      <button class="tool" id="tool-rotate" title="Rotate the selection"><span class="glyph">⟳</span><span class="cap">Rotate E</span></button>
+      <button class="tool" id="tool-scale" title="Scale the selection (props only)"><span class="glyph">⤢</span><span class="cap">Scale R</span></button>
+    </div>
+    <div class="tsep"></div>
+    <div class="tgroup">
+      <button class="tool" id="tool-spawner" title="Click the ground to place an NPC spawner"><span class="glyph">👥</span><span class="cap">Spawner</span></button>
+      <button class="tool" id="tool-spawnpoint" title="Click the ground to set the player spawn"><span class="glyph">⚑</span><span class="cap">Spawn Pt</span></button>
+      <button class="tool" id="tool-terrain" title="Sculpt heights and paint the ground"><span class="glyph">⛰</span><span class="cap">Terrain T</span></button>
+    </div>
+    <div class="tsep"></div>
+    <button class="tool" id="delete-btn" title="Delete the selection"><span class="glyph">🗑</span><span class="cap">Del</span></button>
+    <button id="save-btn">💾 Save World</button>
+  </div>
+
+  <div id="viewport"></div>
+
+  <div id="statusbar">
+    <span id="status-counts"></span>
+    <span id="status-msg">connecting…</span>
+    <span class="right">left-drag orbit · right-drag pan · wheel zoom · Q/W/E/R/T tools · Del delete</span>
+  </div>
+
+  <template id="tpl-spawner">
+    <label>NPC <select id="sp-kind"></select></label>
+    <label>Count <input id="sp-count" type="number" value="3" min="1" max="10" /></label>
+    <label>Respawn (ms) <input id="sp-respawn" type="number" value="10000" step="1000" /></label>
+    <label>Aggro radius <input id="sp-aggro" type="number" value="10" /></label>
+    <div class="muted">Click the ground to place a spawner with these settings.</div>
+    <button id="sp-manage">Manage NPCs… <span class="kbd">F5</span></button>
+  </template>
+
+  <div id="auth-overlay" class="overlay">
+    <div class="panel-box">
+      <h2>Editor login</h2>
+      <div class="err" id="auth-error"></div>
+      <input id="auth-token" type="password" placeholder="Editor token (default: dev)" />
+      <button id="auth-btn">Connect</button>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

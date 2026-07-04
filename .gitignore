@@ -1,0 +1,5 @@
+node_modules/
+dist/
+data/players/
+*.log
+.DS_Store

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($z = Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue; if \\($z\\) { $z | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Stop-Process -Id $_ -Force } ; Start-Sleep -Seconds 1 }; \"port check done\")"
+    ]
+  }
+}
