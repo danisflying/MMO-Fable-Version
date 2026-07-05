@@ -12,6 +12,9 @@ const RUN_SPEED = 4;
 const WALK_SPEED = 0.3;
 /** This far above the ground the falling clip plays instead of ground locomotion. */
 const AIRBORNE_Y = 0.12;
+/** Footstep cadence, ms between steps (faster while running). */
+const WALK_STEP_MS = 430;
+const RUN_STEP_MS = 260;
 
 type Locomotion = "idle" | "walk" | "run" | "fall";
 
@@ -35,6 +38,9 @@ interface View {
   /** Post-cast redraw window; shows "Interrupted!" if the cast was broken. */
   castFlashUntil: number;
   castInterrupted: boolean;
+  /** Footstep cadence accumulator (ms) while walking/running on the ground. */
+  stepAcc: number;
+  airborne: boolean;
 }
 
 /** Syncs replicated entity state into Three.js objects (model + animation + nameplate). */
@@ -47,6 +53,10 @@ export class EntityViews {
   private questMarkers = new Map<string, string>();
   /** Terrain height sampler; entities above it play the falling clip. */
   groundHeight: (x: number, z: number) => number = () => 0;
+  /** Movement audio hooks — fired for every entity, self included. */
+  onFootstep: ((id: number, x: number, z: number, running: boolean) => void) | null = null;
+  onJump: ((id: number, x: number, z: number) => void) | null = null;
+  onLand: ((id: number, x: number, z: number) => void) | null = null;
 
   constructor(scene: THREE.Scene) {
     scene.add(this.root);
@@ -114,6 +124,8 @@ export class EntityViews {
       cast: null,
       castFlashUntil: 0,
       castInterrupted: false,
+      stepAcc: 0,
+      airborne: false,
     };
     this.views.set(e.id, view);
     this.root.add(obj);
@@ -209,20 +221,40 @@ export class EntityViews {
         }
       }
 
+      // Airborne test drives both the falling clip and jump/land audio, for
+      // every entity (only players jump today, but this stays entity-agnostic).
+      const ground = this.groundHeight(view.obj.position.x, view.obj.position.z);
+      const airborne = view.obj.position.y > ground + AIRBORNE_Y;
+      if (airborne && !view.airborne) this.onJump?.(id, view.obj.position.x, view.obj.position.z);
+      else if (!airborne && view.airborne) this.onLand?.(id, view.obj.position.x, view.obj.position.z);
+      view.airborne = airborne;
+
       // Drive locomotion from how fast the rendered position actually moves.
+      let desired: Locomotion = "idle";
       if (view.mixer) {
         if (dt > 0 && view.lastX !== null && view.lastZ !== null && !view.attacking) {
           const speed =
             Math.hypot(view.obj.position.x - view.lastX, view.obj.position.z - view.lastZ) / dt;
-          let desired: Locomotion = speed > RUN_SPEED ? "run" : speed > WALK_SPEED ? "walk" : "idle";
-          const ground = this.groundHeight(view.obj.position.x, view.obj.position.z);
-          if (view.obj.position.y > ground + AIRBORNE_Y && view.actions.fall) desired = "fall";
+          desired = speed > RUN_SPEED ? "run" : speed > WALK_SPEED ? "walk" : "idle";
+          if (airborne && view.actions.fall) desired = "fall";
           this.fadeTo(view, desired);
         }
         view.mixer.update(dt);
       }
       view.lastX = view.obj.position.x;
       view.lastZ = view.obj.position.z;
+
+      // Footsteps: cadence while walking/running on the ground.
+      if (!airborne && (desired === "walk" || desired === "run") && dt > 0) {
+        view.stepAcc += dt * 1000;
+        const interval = desired === "run" ? RUN_STEP_MS : WALK_STEP_MS;
+        if (view.stepAcc >= interval) {
+          view.stepAcc -= interval;
+          this.onFootstep?.(id, view.obj.position.x, view.obj.position.z, desired === "run");
+        }
+      } else {
+        view.stepAcc = 0;
+      }
 
       if (view.modelObj) {
         const pulse = view.pulseUntil > now ? 1.15 : 1;

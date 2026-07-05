@@ -49,6 +49,13 @@ export function deathSystem(ctx: GameCtx): void {
       world.markDirty(e, Transform);
       world.markDirty(e, Health);
       ctx.lastAttackerByVictim.delete(e);
+      // The kill is the fight's end: everything hunting this player gives up
+      // and heads home (npcAi's disengage path — cancels casts, despawns
+      // packs) instead of chasing the corpse run to the spawn point.
+      for (const npc of world.query(NpcAi)) {
+        const ai = world.require(npc, NpcAi);
+        if (ai.target === e) ai.target = 0;
+      }
       sessionByEntity(ctx, e)?.send({ t: "death" });
     } else if (world.has(e, NpcTag)) {
       const killer = ctx.lastAttackerByVictim.get(e);

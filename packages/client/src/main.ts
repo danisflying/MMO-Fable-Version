@@ -26,6 +26,7 @@ import { Effects } from "./render/effects";
 import { EntityViews } from "./render/entityViews";
 import { Input } from "./input/input";
 import { UI, type CooldownState } from "./ui/ui";
+import { AudioEngine } from "./audio/audio";
 
 const TAB_TARGET_RANGE = 40;
 
@@ -39,6 +40,13 @@ const views = new EntityViews(scene);
 views.groundHeight = (x, z) => heightAt(terrainMesh.terrain, x, z);
 const effects = new Effects(scene);
 effects.positionOf = (id) => views.positionOf(id);
+const audio = new AudioEngine();
+views.onFootstep = (id, x, z, running) => audio.playFootstep(x, z, running);
+views.onJump = (id, x, z) => audio.playJump(x, z);
+views.onLand = (id, x, z) => audio.playLand(x, z);
+// Audio needs a real user gesture before browsers allow sound.
+window.addEventListener("pointerdown", () => audio.unlock(), { once: true });
+window.addEventListener("keydown", () => audio.unlock(), { once: true });
 const raycaster = new THREE.Raycaster();
 
 let conn: Connection | null = null;
@@ -85,6 +93,9 @@ repl.onRemoved = (id: number) => {
   views.remove(id);
   rebuildColliders();
   if (id === target) clearTarget();
+  // Entity is gone (died, despawned, or left AOI) — nothing will ever send
+  // the castEvent "done"/"interrupted" to stop a drone it was mid-cast on.
+  audio.stopCastLoop(id, false);
 };
 repl.onChanged = (e: NetEntity, names: string[]) => {
   views.changed(e, names);
@@ -203,12 +214,14 @@ function useAbility(id: string): void {
   const tgt = def.targetSelf ? repl.selfId : target;
   if (!tgt || (!def.targetSelf && !repl.entities.has(tgt))) {
     ui.addSystem("No target — press Tab or click an enemy.");
+    audio.playAbilityFail();
     return;
   }
   conn.send({ t: "attack", target: tgt, ability: id });
   // Optimistic; refunded if the server sends abilityFail.
   cooldowns.set(id, { until: now + def.cooldownMs, total: def.cooldownMs });
   views.playAttack(repl.selfId);
+  audio.playAbilityUse(id);
 }
 
 input.onAbility = (slot) => {
@@ -285,6 +298,7 @@ function printQuestNotices(prev: QuestStateMsg | null, next: QuestStateMsg): voi
     const old = prev.active.find((q) => q.questId === qp.questId);
     if (!old) {
       ui.addSystem(`Quest accepted: ${def.name}`);
+      audio.playQuestAccept();
       continue;
     }
     def.objectives.forEach((obj, i) => {
@@ -293,6 +307,7 @@ function printQuestNotices(prev: QuestStateMsg | null, next: QuestStateMsg): voi
       if (now <= was) return;
       if (isObjectiveDone(obj, now)) {
         ui.addSystem(`Objective complete: ${obj.label}`);
+        audio.playObjectiveTick();
       } else {
         ui.addSystem(`${obj.label}: ${now}/${objectiveTarget(obj)}`);
       }
@@ -301,10 +316,14 @@ function printQuestNotices(prev: QuestStateMsg | null, next: QuestStateMsg): voi
   for (const id of next.completed) {
     if (prev.completed.includes(id)) continue;
     const def = questsById[id];
-    if (def) ui.addSystem(`Quest complete: ${def.name} (+${def.xpReward} XP)`);
+    if (def) {
+      ui.addSystem(`Quest complete: ${def.name} (+${def.xpReward} XP)`);
+      audio.playQuestComplete();
+    }
   }
   if (next.level > prev.level) {
     ui.addSystem(`Level up! You are now level ${next.level}.`);
+    audio.playLevelUp();
   }
 }
 
@@ -361,6 +380,12 @@ function wireHandlers(c: Connection): void {
       if (ev.damage > 0) views.pulse(ev.target);
       if (ev.attacker !== repl.selfId) views.playAttack(ev.attacker);
       effects.onCombatEvent(ev, views.positionOf(ev.attacker), views.positionOf(ev.target));
+      audio.onCombatEvent(
+        ev,
+        views.positionOf(ev.target),
+        repl.selfId,
+        !!repl.entities.get(ev.target)?.npcTag,
+      );
       if (ev.died && ev.target === target) clearTarget();
     }
   });
@@ -370,9 +395,12 @@ function wireHandlers(c: Connection): void {
       if (ev.phase === "start") {
         views.startCast(ev.caster, ev.ability, ev.durationMs);
         effects.startChannel(ev.caster, def?.fx.color ?? 0xffffff, ev.durationMs);
+        const pos = views.positionOf(ev.caster);
+        if (pos) audio.startCastLoop(ev.caster, ev.ability, pos);
       } else {
         views.endCast(ev.caster, ev.phase === "interrupted");
         effects.stopChannel(ev.caster);
+        audio.stopCastLoop(ev.caster, ev.phase === "interrupted");
         if (ev.phase === "interrupted" && ev.by === repl.selfId) {
           const caster = repl.entities.get(ev.caster);
           const who = caster?.npcTag?.kind ?? caster?.playerTag?.name ?? "the enemy";
@@ -384,9 +412,11 @@ function wireHandlers(c: Connection): void {
   c.on("abilityFail", (m) => {
     cooldowns.delete(m.ability); // refund the optimistic cooldown
     ui.addSystem(`${ABILITIES[m.ability]?.name ?? m.ability}: ${m.reason}`);
+    audio.playAbilityFail();
   });
   c.on("death", () => {
     ui.showDeath();
+    audio.playPlayerDeathSelf();
     clearTarget();
   });
   c.on("terrainPatch", (m) => {
@@ -464,6 +494,7 @@ function frame(): void {
   const self = pred.renderPos(acc / TICK_MS);
   views.update(repl, self, now);
   effects.update(dt);
+  audio.setListener(self.x, self.z);
 
   // WoW camera: orbits the player opposite the look direction; drifts back
   // behind the character while moving unless a mouse button is held.
